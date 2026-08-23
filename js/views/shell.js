@@ -6,7 +6,7 @@
 import { AppState, showToast } from '../state.js';
 import { ICONS, escapeHtml } from '../config.js';
 import { saveData } from '../db/data.js';
-import { signOutSupabase, pullFromSupabase, updateSnapshotsFromCurrent, loadAccessContext } from '../db/sync.js';
+import { signOutSupabase, pullFromSupabase, updateSnapshotsFromCurrent, loadAccessContext, switchSection } from '../db/sync.js';
 import { renderAuthScreen } from '../auth.js';
 import {
   renderConfirmModal, attachConfirmModal,
@@ -98,22 +98,7 @@ function attachShellEvents() {
   });
   const sectionSwitcher = document.getElementById('sectionSwitcher');
   if (sectionSwitcher) sectionSwitcher.addEventListener('change', async e => {
-    const previousSectionId = AppState.activeSectionId;
-    const newSectionId = e.target.value;
-    if (!navigator.onLine) {
-      showToast('Changement de Section impossible hors ligne — reconnectez-vous et réessayez');
-      sectionSwitcher.value = previousSectionId; // annule visuellement la sélection
-      return;
-    }
-    AppState.activeSectionId = newSectionId;
-    try {
-      AppState.data = await pullFromSupabase();
-      updateSnapshotsFromCurrent();
-    } catch (err) {
-      AppState.activeSectionId = previousSectionId; // on revient à un état cohérent
-      showToast('Impossible de charger cette Section : ' + (err && err.message ? err.message : 'réessayez plus tard'));
-    }
-    render();
+    await switchSection(e.target.value);
   });
 }
 
