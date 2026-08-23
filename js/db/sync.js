@@ -1,6 +1,8 @@
 // db/sync.js — Synchronisation multi-appareils via Supabase.
 // Regroupe : initialisation du client, push/pull, snapshots de réconciliation,
-// abonnement temps réel, et le point d'entrée `startApp` / `reconcileSync`.
+// abonnement temps réel, le point d'entrée `startApp` / `reconcileSync`, et
+// la bascule entre Sections avec cache local par Section (fonctionne hors
+// ligne pour toute Section déjà visitée sur cet appareil).
 //
 // L'état de session (sb, sbUser, sbProfile, sbSections, sbUsers) et l'état
 // métier (AppState.data, AppState.activeSectionId) vivent dans AppState —
@@ -15,51 +17,92 @@ const ACCESS_CONTEXT_KEY = 'carnet-access-context';
 const SYNC_STATE_BACKUP_KEY = 'carnet-sync-state-backup';
 export const LOCAL_BACKUP_KEY = 'carnet-data-backup';
 
-const snapshotMaps = { programmes: new Map(), membres: new Map(), sessions: new Map(), pointages: new Map(), amphiDocuments: new Map(), observations: new Map() };
-let syncState = { pending: false, snapshots: null };
+// Les données (programmes/membres/.../observations) sont mises en cache
+// PAR SECTION, pas dans une case unique — c'est ce qui permet à un
+// super-admin ou un compte "pf" de naviguer entre plusieurs Sections déjà
+// visitées même sans connexion. Chaque Section a sa propre clé IndexedDB.
+function sectionDataKey(sectionId) { return 'carnet-data:' + sectionId; }
 
-function serialiseSnapshots() {
-  return Object.fromEntries(Object.entries(snapshotMaps).map(([table, map]) => [table, Array.from(map.entries())]));
+/* ================= Snapshots de synchronisation (par Section) ================= */
+// Avant la gestion multi-Section, ces snapshots (baseline utilisée pour
+// diffuser les changements locaux vers Supabase) étaient uniques pour toute
+// l'app. Désormais, chaque Section a sa propre baseline indépendante, sinon
+// basculer vers une autre Section puis y écrire confondrait ses données
+// avec celles de la Section précédente lors du prochain envoi.
+const perSectionSnapshots = new Map(); // sectionId -> { programmes, membres, sessions, pointages, amphiDocuments, observations }
+function emptySnapshotSet() {
+  return { programmes: new Map(), membres: new Map(), sessions: new Map(), pointages: new Map(), amphiDocuments: new Map(), observations: new Map() };
 }
-function restoreSnapshots(snapshots) {
-  if (!snapshots) return;
-  Object.keys(snapshotMaps).forEach(table => { snapshotMaps[table] = new Map(snapshots[table] || []); });
+function snapshotsFor(sectionId) {
+  if (!perSectionSnapshots.has(sectionId)) perSectionSnapshots.set(sectionId, emptySnapshotSet());
+  return perSectionSnapshots.get(sectionId);
 }
-async function loadSyncState() {
+
+let pendingFlags = new Map(); // sectionId -> boolean ("changements locaux pas encore envoyés")
+
+function serialisePerSectionSnapshots() {
+  const obj = {};
+  perSectionSnapshots.forEach((snap, sectionId) => {
+    obj[sectionId] = Object.fromEntries(Object.entries(snap).map(([table, map]) => [table, Array.from(map.entries())]));
+  });
+  return obj;
+}
+function restorePerSectionSnapshots(obj) {
+  if (!obj) return;
+  Object.entries(obj).forEach(([sectionId, tables]) => {
+    const snap = emptySnapshotSet();
+    Object.keys(snap).forEach(table => { snap[table] = new Map((tables && tables[table]) || []); });
+    perSectionSnapshots.set(sectionId, snap);
+  });
+}
+async function loadSyncStateBlob() {
   try { const saved = await idbGet(SYNC_STATE_KEY); if (saved) return saved; } catch (e) { /* copie de secours ci-dessous */ }
   try { const backup = localStorage.getItem(SYNC_STATE_BACKUP_KEY); return backup ? JSON.parse(backup) : null; } catch (e) { return null; }
 }
 export async function saveSyncState(pending) {
-  syncState = { pending: !!pending, snapshots: serialiseSnapshots() };
-  try { localStorage.setItem(SYNC_STATE_BACKUP_KEY, JSON.stringify(syncState)); } catch (e) { /* stockage indisponible */ }
-  try { await idbSet(SYNC_STATE_KEY, syncState); } catch (e) { /* la copie locale reste disponible */ }
+  if (AppState.activeSectionId) pendingFlags.set(AppState.activeSectionId, !!pending);
+  const blob = { pendingFlags: Array.from(pendingFlags.entries()), snapshots: serialisePerSectionSnapshots() };
+  try { localStorage.setItem(SYNC_STATE_BACKUP_KEY, JSON.stringify(blob)); } catch (e) { /* stockage indisponible */ }
+  try { await idbSet(SYNC_STATE_KEY, blob); } catch (e) { /* la copie locale reste disponible */ }
 }
 
-// À appeler une fois au démarrage (main.js) : restaure l'état de synchro
-// connu (snapshots + drapeau "en attente") avant toute tentative de push/pull.
+// À appeler une fois au démarrage (main.js), une fois AppState.activeSectionId
+// connu (via loadCachedAccessContext ou une connexion réussie) : restaure
+// les snapshots et drapeaux "en attente" de TOUTES les Sections déjà
+// rencontrées sur cet appareil.
 export async function initSyncState(hasLocalData) {
-  const loaded = await loadSyncState();
-  syncState = loaded || (hasLocalData ? { pending: true, snapshots: null } : syncState);
-  if (syncState.snapshots) restoreSnapshots(syncState.snapshots);
+  const loaded = await loadSyncStateBlob();
+  if (loaded && loaded.pendingFlags) {
+    pendingFlags = new Map(loaded.pendingFlags);
+    restorePerSectionSnapshots(loaded.snapshots);
+  } else if (loaded && loaded.snapshots && AppState.activeSectionId) {
+    // Ancien format, antérieur à la gestion multi-Section (une seule
+    // Section existait alors) : on rattache ces snapshots à la Section
+    // actuellement active pour ne rien perdre de ce qui était en cache.
+    pendingFlags = new Map([[AppState.activeSectionId, !!loaded.pending]]);
+    const snap = emptySnapshotSet();
+    Object.keys(snap).forEach(table => { snap[table] = new Map(loaded.snapshots[table] || []); });
+    perSectionSnapshots.set(AppState.activeSectionId, snap);
+  } else if (hasLocalData && AppState.activeSectionId) {
+    pendingFlags.set(AppState.activeSectionId, true);
+  }
 }
-export function isSyncPending() { return !!syncState.pending; }
+export function isSyncPending() { return AppState.activeSectionId ? !!pendingFlags.get(AppState.activeSectionId) : false; }
 
 export function updateSnapshotsFromCurrent() {
   const d = AppState.data;
-  snapshotMaps.programmes = new Map(d.programmes.map(r => [r.id, JSON.stringify(r)]));
-  snapshotMaps.membres = new Map(d.membres.map(r => [r.id, JSON.stringify(r)]));
-  snapshotMaps.sessions = new Map(d.sessions.map(r => [r.id, JSON.stringify(r)]));
-  snapshotMaps.pointages = new Map(d.pointages.map(r => [r.id, JSON.stringify(r)]));
-  snapshotMaps.amphiDocuments = new Map((d.amphiDocuments || []).map(r => [r.id, JSON.stringify(r)]));
-  snapshotMaps.observations = new Map((d.observations || []).map(r => [r.id, JSON.stringify(r)]));
+  const snap = snapshotsFor(AppState.activeSectionId);
+  snap.programmes = new Map(d.programmes.map(r => [r.id, JSON.stringify(r)]));
+  snap.membres = new Map(d.membres.map(r => [r.id, JSON.stringify(r)]));
+  snap.sessions = new Map(d.sessions.map(r => [r.id, JSON.stringify(r)]));
+  snap.pointages = new Map(d.pointages.map(r => [r.id, JSON.stringify(r)]));
+  snap.amphiDocuments = new Map((d.amphiDocuments || []).map(r => [r.id, JSON.stringify(r)]));
+  snap.observations = new Map((d.observations || []).map(r => [r.id, JSON.stringify(r)]));
 }
+// Ne réinitialise QUE la Section actuellement active (ex. après "Zone
+// sensible" / réinitialisation), jamais les autres Sections en cache.
 export function resetSnapshots() {
-  snapshotMaps.programmes = new Map();
-  snapshotMaps.membres = new Map();
-  snapshotMaps.sessions = new Map();
-  snapshotMaps.pointages = new Map();
-  snapshotMaps.amphiDocuments = new Map();
-  snapshotMaps.observations = new Map();
+  perSectionSnapshots.set(AppState.activeSectionId, emptySnapshotSet());
 }
 
 export async function pullFromSupabase() {
@@ -215,20 +258,21 @@ export async function pushToSupabase() {
     const section_id = AppState.activeSectionId;
     if (!section_id) throw new Error('Aucune Section attribuée');
     const d = AppState.data;
-    snapshotMaps.programmes = await syncTable('programmes', d.programmes, p => ({ id: p.id, nom: p.nom, section_id }), snapshotMaps.programmes);
-    snapshotMaps.membres = await syncTable('membres', d.membres, m => ({ id: m.id, nom: m.nom, prenom: m.prenom, sexe: m.sexe, programme_ids: m.programmeIds || [], all_programmes: !!m.allProgrammes, ap: !!m.ap, extra: m.extra || {}, sortant_since: m.sortantSince || null, section_id }), snapshotMaps.membres);
-    snapshotMaps.sessions = await syncTable('sessions', d.sessions, s => ({ id: s.id, programme_id: s.programmeId, date: s.date, label: s.label, section_id }), snapshotMaps.sessions);
-    snapshotMaps.pointages = await syncTable('pointages', d.pointages, p => ({ id: p.id, session_id: p.sessionId, membre_id: p.membreId, statut: p.statut, section_id }), snapshotMaps.pointages);
-    snapshotMaps.amphiDocuments = await syncTable('amphi_documents', d.amphiDocuments || [], a => ({
+    const snap = snapshotsFor(section_id);
+    snap.programmes = await syncTable('programmes', d.programmes, p => ({ id: p.id, nom: p.nom, section_id }), snap.programmes);
+    snap.membres = await syncTable('membres', d.membres, m => ({ id: m.id, nom: m.nom, prenom: m.prenom, sexe: m.sexe, programme_ids: m.programmeIds || [], all_programmes: !!m.allProgrammes, ap: !!m.ap, extra: m.extra || {}, sortant_since: m.sortantSince || null, section_id }), snap.membres);
+    snap.sessions = await syncTable('sessions', d.sessions, s => ({ id: s.id, programme_id: s.programmeId, date: s.date, label: s.label, section_id }), snap.sessions);
+    snap.pointages = await syncTable('pointages', d.pointages, p => ({ id: p.id, session_id: p.sessionId, membre_id: p.membreId, statut: p.statut, section_id }), snap.pointages);
+    snap.amphiDocuments = await syncTable('amphi_documents', d.amphiDocuments || [], a => ({
       id: a.id, section_id, ufr: a.ufr, filiere: a.filiere, niveau: a.niveau || '', type: a.type, titre: a.titre, reference: a.reference || '',
       file_name: a.fileName || null, storage_path: a.storagePath || null,
       correction_file_name: a.correctionFileName || null, correction_storage_path: a.correctionStoragePath || null,
       lien_url: a.lienUrl || null, uploader_name: a.uploaderName || '', uploader_user_id: a.uploaderUserId || null,
-    }), snapshotMaps.amphiDocuments);
-    snapshotMaps.observations = await syncTable('observations', d.observations || [], o => ({
+    }), snap.amphiDocuments);
+    snap.observations = await syncTable('observations', d.observations || [], o => ({
       id: o.id, section_id, author_user_id: o.authorUserId || null, author_name: o.authorName || '', author_role: o.authorRole || '',
       content: o.content, created_at: o.createdAt || new Date().toISOString(), updated_at: o.updatedAt || o.createdAt || new Date().toISOString(),
-    }), snapshotMaps.observations);
+    }), snap.observations);
     await saveSyncState(false);
     return true;
   } catch (e) {
@@ -261,7 +305,7 @@ function handleRemoteChange() {
       AppState.data.amphiDocuments = remote.amphiDocuments;
       AppState.data.observations = remote.observations;
       updateSnapshotsFromCurrent();
-      await idbSet('carnet-data', AppState.data);
+      await idbSet(sectionDataKey(AppState.activeSectionId), AppState.data);
       showToast('Données mises à jour depuis un autre appareil');
       AppState.render();
     } catch (e) { /* on retentera au prochain changement */ }
@@ -283,7 +327,7 @@ export function subscribeRealtime() {
     .subscribe();
 }
 
-/* ================= Démarrage & réconciliation ================= */
+/* ================= Démarrage, réconciliation & bascule de Section ================= */
 
 export async function startApp(localData) {
   let data = localData || emptyData();
@@ -308,7 +352,7 @@ export async function startApp(localData) {
       }
       data = await pullFromSupabase();
       if (!data.profile.name && localData && localData.profile.name) data.profile.name = localData.profile.name;
-      await idbSet('carnet-data', data);
+      await idbSet(sectionDataKey(AppState.activeSectionId), data);
       remoteReady = true;
     } catch (e) {
       data = localData || emptyData();
@@ -358,7 +402,7 @@ export async function reconcileSync(manual) {
     AppState.data.observations = remote.observations;
     if (!AppState.data.profile.name && remote.profile.name) AppState.data.profile.name = remote.profile.name;
     updateSnapshotsFromCurrent();
-    await idbSet('carnet-data', AppState.data);
+    await idbSet(sectionDataKey(AppState.activeSectionId), AppState.data);
     subscribeRealtime();
     showToast(manual ? 'Données synchronisées ✓' : 'Reconnecté — données synchronisées');
     AppState.render();
@@ -371,6 +415,55 @@ export async function reconcileSync(manual) {
   }
 }
 
+// Bascule vers une autre Section (super-admin / "pf" uniquement, qui ont
+// accès à plusieurs Sections) : affichage IMMÉDIAT depuis le cache local de
+// cette Section si elle a déjà été visitée sur cet appareil — fonctionne
+// donc hors ligne — puis rafraîchissement depuis le serveur en tâche de
+// fond si une connexion est disponible. Pousse aussi, avant de basculer,
+// les changements en attente de la Section qu'on quitte, pour ne jamais
+// les perdre entre deux visites.
+export async function switchSection(newSectionId) {
+  const previousSectionId = AppState.activeSectionId;
+  if (previousSectionId && previousSectionId !== newSectionId && navigator.onLine && AppState.sb && AppState.sbUser) {
+    try { await pushToSupabase(); } catch (e) { /* on continue quand même vers la nouvelle Section */ }
+  }
+
+  AppState.activeSectionId = newSectionId;
+  await persistAccessContext();
+
+  let cached = null;
+  try { cached = await idbGet(sectionDataKey(newSectionId)); } catch (e) { /* noop */ }
+  if (cached) { AppState.data = cached; updateSnapshotsFromCurrent(); }
+
+  if (!navigator.onLine || !AppState.sb || !AppState.sbUser) {
+    if (!cached) {
+      AppState.data = emptyData();
+      showToast('Cette Section n’a encore jamais été consultée sur cet appareil — connectez-vous pour la charger');
+    } else {
+      showToast('Affichage hors ligne des dernières données connues pour cette Section');
+    }
+    AppState.render();
+    return;
+  }
+
+  try {
+    const remote = await pullFromSupabase();
+    if (!remote.profile.name && AppState.data?.profile?.name) remote.profile.name = AppState.data.profile.name;
+    AppState.data = remote;
+    updateSnapshotsFromCurrent();
+    await saveSyncState(false);
+    try { await idbSet(sectionDataKey(newSectionId), AppState.data); } catch (e) { /* noop */ }
+  } catch (e) {
+    if (!cached) {
+      AppState.data = emptyData();
+      showToast('Impossible de charger cette Section : ' + (e && e.message ? e.message : 'réessayez plus tard'));
+    } else {
+      showToast('Affichage des dernières données connues (hors ligne) pour cette Section');
+    }
+  }
+  AppState.render();
+}
+
 export function signOutSupabase() {
   const sb = AppState.sb;
   if (!sb) return;
@@ -380,7 +473,10 @@ export function signOutSupabase() {
     async () => {
       try { await sb.auth.signOut(); } catch (e) { /* on nettoie quand même localement */ }
       AppState.sbUser = null;
-      try { await idbDelete('carnet-data'); } catch (e) { /* noop */ }
+      try { await idbDelete('carnet-data'); } catch (e) { /* ancienne clé mono-Section, si encore présente */ }
+      for (const s of AppState.sbSections || []) {
+        try { await idbDelete(sectionDataKey(s.id)); } catch (e) { /* noop */ }
+      }
       try { await idbDelete(SYNC_STATE_KEY); } catch (e) { /* noop */ }
       try { await idbDelete(ACCESS_CONTEXT_KEY); } catch (e) { /* noop */ }
       try { localStorage.removeItem(LOCAL_BACKUP_KEY); } catch (e) { /* noop */ }
