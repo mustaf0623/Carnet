@@ -205,6 +205,7 @@ async function persistAccessContext() {
     await idbSet(ACCESS_CONTEXT_KEY, {
       sbProfile: AppState.sbProfile,
       sbSections: AppState.sbSections,
+      sbUsers: AppState.sbUsers,
       activeSectionId: AppState.activeSectionId,
       myMembreInfo: AppState.myMembreInfo,
     });
@@ -223,6 +224,7 @@ export async function loadCachedAccessContext() {
     if (!cached) return false;
     AppState.sbProfile = cached.sbProfile || null;
     AppState.sbSections = cached.sbSections || [];
+    AppState.sbUsers = cached.sbUsers || [];
     AppState.activeSectionId = cached.activeSectionId || null;
     AppState.myMembreInfo = cached.myMembreInfo || null;
     return true;
