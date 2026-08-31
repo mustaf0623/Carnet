@@ -14,7 +14,17 @@ export function renderPointage() {
   const isReadOnly = AppState.sbProfile?.role === 'pf';
   if (!d.programmes.length) return `<div class="page-head"><div><div class="eyebrow">Registre</div><h1 class="page-title">Pointage</h1></div></div>
     <div class="card empty-state">${ICONS.pointage}<h3 style="color:var(--ink);margin:0 0 6px;">Aucun programme</h3><p>Créez d’abord un programme dans l’onglet Membres.</p></div>`;
-  if (!AppState.pointageProgId) AppState.pointageProgId = d.programmes[0].id;
+  // Reprend le premier programme disponible si l'identifiant mémorisé est
+  // absent OU s'il ne correspond plus à AUCUN programme des données
+  // actuellement chargées (ex. après un changement de Section — les
+  // identifiants sont générés aléatoirement par Section, donc quasiment
+  // jamais valides d'une Section à l'autre — ou après suppression du
+  // programme). Sans ce second cas, `prog` ci-dessous restait `undefined`
+  // et `prog.nom` plantait tout le rendu de l'application.
+  if (!AppState.pointageProgId || !d.programmes.some(p => p.id === AppState.pointageProgId)) {
+    AppState.pointageProgId = d.programmes[0].id;
+    AppState.pointageSessionId = 'new';
+  }
   const prog = d.programmes.find(p => p.id === AppState.pointageProgId);
   const pastSessions = d.sessions.filter(s => s.programmeId === AppState.pointageProgId).sort((a, b) => b.date.localeCompare(a.date));
 

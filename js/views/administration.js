@@ -2,6 +2,13 @@
 // Sections et des comptes utilisateurs. Agit directement sur Supabase (données
 // partagées entre Sections), jamais stockées en local.
 //
+// La liste des utilisateurs peut compter plusieurs centaines de comptes :
+// elle est donc filtrable (recherche nom/email, rôle, Section, statut) et
+// affichée par lots ("Afficher plus") plutôt que d'un seul bloc — ça évite
+// à la fois une page interminable à faire défiler et de déclencher d'un
+// coup des dizaines de requêtes réseau (chaque ligne "Utilisateur" charge
+// la liste des membres de sa Section pour son sélecteur).
+//
 // Attribution du rôle "utilisateur" : ce rôle n'a de sens qu'accompagné d'un
 // membre correspondant (matched_membre_id), utilisé pour dériver son
 // UFR/Filière côté Amphithéâtre. L'attribution manuelle passe donc par la
@@ -11,6 +18,8 @@ import { AppState, showToast, openConfirm } from '../state.js';
 import { escapeHtml } from '../config.js';
 import { emptyRow } from '../components/ui.js';
 import { loadAccessContext, pullFromSupabase, updateSnapshotsFromCurrent } from '../db/sync.js';
+
+const USERS_PAGE_SIZE = 50;
 
 // Cache des membres par Section (id -> [{id, nom, prenom}]), pour peupler le
 // sélecteur sans refaire une requête à chaque interaction.
@@ -25,37 +34,84 @@ async function fetchMembresForSection(sectionId) {
   return list;
 }
 
+function normSearch(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+// Applique recherche + filtres (rôle, Section, statut) et trie
+// alphabétiquement — bien plus facile à parcourir que l'ordre de création
+// brut une fois qu'il y a beaucoup de comptes.
+function filteredSbUsers() {
+  const q = normSearch(AppState.adminUserSearch);
+  return AppState.sbUsers
+    .filter(u => {
+      if (AppState.adminUserRoleFilter !== 'tous' && u.role !== AppState.adminUserRoleFilter) return false;
+      if (AppState.adminUserSectionFilter !== 'toutes' && (u.section_id || '') !== AppState.adminUserSectionFilter) return false;
+      if (AppState.adminUserActiveFilter === 'actifs' && u.active === false) return false;
+      if (AppState.adminUserActiveFilter === 'inactifs' && u.active !== false) return false;
+      if (q && !normSearch(`${u.name || ''} ${u.email || ''}`).includes(q)) return false;
+      return true;
+    })
+    .sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
+}
+
 export function renderAdministration() {
   const sectionOptions = `<option value="">Aucune Section</option>` + AppState.sbSections.map(s => `<option value="${s.id}">${escapeHtml(s.nom)}</option>`).join('');
   const offlineNotice = !navigator.onLine ? `<div style="background:var(--terracotta-tint);border:1px solid var(--terracotta);color:var(--terracotta-dim);border-radius:var(--radius-sm);padding:10px 14px;font-size:12.5px;font-weight:600;margin-bottom:16px;">Hors ligne — la gestion des Sections et des utilisateurs nécessite une connexion internet.</div>` : '';
+
+  const allFiltered = filteredSbUsers();
+  const visible = allFiltered.slice(0, AppState.adminUserVisibleCount);
+  const hasMore = allFiltered.length > visible.length;
+  const sectionFilterOptions = `<option value="toutes" ${AppState.adminUserSectionFilter === 'toutes' ? 'selected' : ''}>Toutes les Sections</option>`
+    + AppState.sbSections.map(s => `<option value="${s.id}" ${AppState.adminUserSectionFilter === s.id ? 'selected' : ''}>${escapeHtml(s.nom)}</option>`).join('');
+
   return `<div class="page-head"><div><div class="eyebrow">Super-administration</div><h1 class="page-title">Sections et utilisateurs</h1><p class="page-sub">Créez les Sections et attribuez les accès.</p></div></div>
     ${offlineNotice}
     <div class="grid grid-2"><div class="card"><h3 class="card-title">Nouvelle Section</h3><div style="display:flex;gap:8px;"><input id="newSectionName" placeholder="Nom de la Section"><button class="btn btn-primary" id="newSectionBtn">Créer</button></div><div class="ledger" style="margin-top:14px;">${AppState.sbSections.map(s => `<div class="admin-section-row" data-id="${s.id}"><input class="admin-section-name" data-id="${s.id}" value="${escapeHtml(s.nom)}" /><div class="admin-section-actions"><button class="btn btn-ghost btn-sm rename-section-btn" data-id="${s.id}">Renommer</button><button class="btn btn-ghost btn-sm delete-section-btn" data-id="${s.id}">Supprimer</button></div></div>`).join('') || emptyRow('Aucune Section.')}</div></div>
-    <div class="card"><h3 class="card-title">Utilisateurs</h3><div class="ledger">${AppState.sbUsers.map(u => {
-      const isSelf = u.id === AppState.sbUser?.id;
-      const isUtilisateur = u.role === 'utilisateur';
-      return `<div class="admin-user-row" data-id="${u.id}">
-        <div class="admin-user-identity">
-          <div class="prog-name">${escapeHtml(u.name || 'Sans nom')}${isSelf ? ' <span style="font-weight:400;color:var(--ink-faint);">(vous)</span>' : ''}</div>
-          <div class="admin-user-email">${escapeHtml(u.email || u.id)}</div>
-          ${isSelf ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:2px;">Rôle et statut modifiables uniquement par un autre super-admin</div>` : ''}
-        </div>
-        <div class="admin-user-controls">
-          <select class="admin-user-section" data-id="${u.id}">${sectionOptions.replace(`value="${u.section_id}"`, `value="${u.section_id}" selected`)}</select>
-          <select class="admin-user-role" data-id="${u.id}" ${isSelf ? 'disabled' : ''}>
-            <option value="utilisateur" ${u.role === 'utilisateur' ? 'selected' : ''}>Utilisateur (Amphithéâtre)</option>
-            <option value="ca" ${u.role === 'ca' ? 'selected' : ''}>CA</option>
-            <option value="pf" ${u.role === 'pf' ? 'selected' : ''}>Visiteur (PF — lecture seule)</option>
-            <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super-admin</option>
-          </select>
-          <select class="admin-user-membre" data-id="${u.id}" data-current="${u.matched_membre_id || ''}" style="min-width:220px;${isUtilisateur ? '' : 'display:none;'}">
-            <option value="">${isUtilisateur ? '— Choisir le membre correspondant —' : ''}</option>
-          </select>
-          <label class="admin-user-active-label"><input class="admin-user-active" data-id="${u.id}" type="checkbox" ${u.active !== false ? 'checked' : ''} ${isSelf ? 'disabled' : ''}>actif</label>
-          <button class="btn btn-ghost btn-sm save-user-btn" data-id="${u.id}">Enregistrer</button>
-        </div>
-      </div>`;
-    }).join('') || emptyRow('Aucun utilisateur.')}</div></div></div>`;
+    <div class="card">
+      <h3 class="card-title">Utilisateurs</h3>
+      <div class="card-sub">${allFiltered.length} sur ${AppState.sbUsers.length} au total${allFiltered.length !== AppState.sbUsers.length ? ' (filtré)' : ''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <input type="text" id="adminUserSearch" placeholder="Rechercher un nom ou un email…" value="${escapeHtml(AppState.adminUserSearch || '')}" style="flex:1;min-width:200px;">
+        <select id="adminUserRoleFilter" style="min-width:170px;">
+          <option value="tous" ${AppState.adminUserRoleFilter === 'tous' ? 'selected' : ''}>Tous les rôles</option>
+          <option value="utilisateur" ${AppState.adminUserRoleFilter === 'utilisateur' ? 'selected' : ''}>Utilisateur (Amphithéâtre)</option>
+          <option value="ca" ${AppState.adminUserRoleFilter === 'ca' ? 'selected' : ''}>CA</option>
+          <option value="pf" ${AppState.adminUserRoleFilter === 'pf' ? 'selected' : ''}>Visiteur (PF)</option>
+          <option value="super_admin" ${AppState.adminUserRoleFilter === 'super_admin' ? 'selected' : ''}>Super-admin</option>
+        </select>
+        <select id="adminUserSectionFilter" style="min-width:170px;">${sectionFilterOptions}</select>
+        <select id="adminUserActiveFilter" style="min-width:130px;">
+          <option value="tous" ${AppState.adminUserActiveFilter === 'tous' ? 'selected' : ''}>Actifs et inactifs</option>
+          <option value="actifs" ${AppState.adminUserActiveFilter === 'actifs' ? 'selected' : ''}>Actifs seulement</option>
+          <option value="inactifs" ${AppState.adminUserActiveFilter === 'inactifs' ? 'selected' : ''}>Inactifs seulement</option>
+        </select>
+      </div>
+      <div class="ledger">${visible.map(u => {
+        const isSelf = u.id === AppState.sbUser?.id;
+        const isUtilisateur = u.role === 'utilisateur';
+        return `<div class="admin-user-row" data-id="${u.id}">
+          <div class="admin-user-identity">
+            <div class="prog-name">${escapeHtml(u.name || 'Sans nom')}${isSelf ? ' <span style="font-weight:400;color:var(--ink-faint);">(vous)</span>' : ''}</div>
+            <div class="admin-user-email">${escapeHtml(u.email || u.id)}</div>
+            ${isSelf ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:2px;">Rôle et statut modifiables uniquement par un autre super-admin</div>` : ''}
+          </div>
+          <div class="admin-user-controls">
+            <select class="admin-user-section" data-id="${u.id}">${sectionOptions.replace(`value="${u.section_id}"`, `value="${u.section_id}" selected`)}</select>
+            <select class="admin-user-role" data-id="${u.id}" ${isSelf ? 'disabled' : ''}>
+              <option value="utilisateur" ${u.role === 'utilisateur' ? 'selected' : ''}>Utilisateur (Amphithéâtre)</option>
+              <option value="ca" ${u.role === 'ca' ? 'selected' : ''}>CA</option>
+              <option value="pf" ${u.role === 'pf' ? 'selected' : ''}>Visiteur (PF — lecture seule)</option>
+              <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super-admin</option>
+            </select>
+            <select class="admin-user-membre" data-id="${u.id}" data-current="${u.matched_membre_id || ''}" style="min-width:220px;${isUtilisateur ? '' : 'display:none;'}">
+              <option value="">${isUtilisateur ? '— Choisir le membre correspondant —' : ''}</option>
+            </select>
+            <label class="admin-user-active-label"><input class="admin-user-active" data-id="${u.id}" type="checkbox" ${u.active !== false ? 'checked' : ''} ${isSelf ? 'disabled' : ''}>actif</label>
+            <button class="btn btn-ghost btn-sm save-user-btn" data-id="${u.id}">Enregistrer</button>
+          </div>
+        </div>`;
+      }).join('') || emptyRow(AppState.sbUsers.length ? 'Aucun utilisateur ne correspond à ces filtres.' : 'Aucun utilisateur.')}</div>
+      ${hasMore ? `<button class="btn btn-ghost btn-sm" id="adminUsersLoadMoreBtn" style="width:100%;justify-content:center;margin-top:12px;">Afficher plus (${allFiltered.length - visible.length} restants)</button>` : ''}
+    </div></div>`;
 }
 
 // Remplit le sélecteur de membre d'une ligne avec les membres de la Section
@@ -119,6 +175,42 @@ export function attachAdministrationEvents() {
       'Supprimer'
     );
   }));
+
+  // Recherche et filtres : chaque changement repart d'un premier lot
+  // (adminUserVisibleCount réinitialisé), sinon le nombre de résultats
+  // visibles resterait calé sur l'ancien filtre et pourrait tout masquer.
+  const searchInput = document.getElementById('adminUserSearch');
+  if (searchInput) searchInput.addEventListener('input', e => {
+    AppState.adminUserSearch = e.target.value;
+    AppState.adminUserVisibleCount = USERS_PAGE_SIZE;
+    const pos = e.target.selectionStart;
+    AppState.render();
+    const again = document.getElementById('adminUserSearch');
+    if (again) { again.focus(); again.setSelectionRange(pos, pos); }
+  });
+  const roleFilter = document.getElementById('adminUserRoleFilter');
+  if (roleFilter) roleFilter.addEventListener('change', e => {
+    AppState.adminUserRoleFilter = e.target.value;
+    AppState.adminUserVisibleCount = USERS_PAGE_SIZE;
+    AppState.render();
+  });
+  const sectionFilter = document.getElementById('adminUserSectionFilter');
+  if (sectionFilter) sectionFilter.addEventListener('change', e => {
+    AppState.adminUserSectionFilter = e.target.value;
+    AppState.adminUserVisibleCount = USERS_PAGE_SIZE;
+    AppState.render();
+  });
+  const activeFilter = document.getElementById('adminUserActiveFilter');
+  if (activeFilter) activeFilter.addEventListener('change', e => {
+    AppState.adminUserActiveFilter = e.target.value;
+    AppState.adminUserVisibleCount = USERS_PAGE_SIZE;
+    AppState.render();
+  });
+  const loadMoreBtn = document.getElementById('adminUsersLoadMoreBtn');
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => {
+    AppState.adminUserVisibleCount += USERS_PAGE_SIZE;
+    AppState.render();
+  });
 
   // Basculer l'affichage du sélecteur de membre selon le rôle choisi, et le
   // repeupler si la Section change pendant que le rôle "utilisateur" est actif.
