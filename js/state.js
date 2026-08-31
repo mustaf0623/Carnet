@@ -46,6 +46,13 @@ export const AppState = {
   membresSubTab: 'actifs',
   watchlistProgramme: 'tous',
   pendingConfirmAction: null,
+  // ---- Administration : liste des utilisateurs (recherche/filtres/pagination,
+  // pour rester utilisable avec plusieurs centaines de comptes) ----
+  adminUserSearch: '',
+  adminUserRoleFilter: 'tous',
+  adminUserSectionFilter: 'toutes',
+  adminUserActiveFilter: 'tous',
+  adminUserVisibleCount: 50,
 
   // ---- Session / synchronisation Supabase ----
   sb: null,
@@ -84,4 +91,26 @@ export function openConfirm(title, message, action, confirmLabel) {
   AppState.confirmLabel = confirmLabel || 'Supprimer';
   AppState.confirmModalOpen = true;
   AppState.render();
+}
+
+// Remet à leurs valeurs par défaut tous les champs d'état UI qui font
+// référence à un identifiant (programme, séance, membre...) propre à une
+// Section précise. À appeler impérativement lors d'un changement de
+// Section : ces identifiants sont générés aléatoirement par Section, donc
+// quasiment jamais valides d'une Section à l'autre. Les laisser traîner
+// provoquait des plantages (ex. Pointage cherchant un programme inexistant
+// dans la nouvelle Section) qui figeaient tout l'affichage jusqu'à ce
+// qu'un rendu réussisse à nouveau par ailleurs.
+export function resetSectionScopedUIState() {
+  AppState.pointageProgId = null;
+  AppState.pointageSessionId = 'new';
+  AppState.memberDetailId = null;
+  AppState.dashProgFilter = 'global';
+  AppState.reportScope = 'global';
+  AppState.reportSessionId = 'toutes';
+  AppState.watchlistProgramme = 'tous';
+  AppState.amphiUfr = '';
+  AppState.amphiFiliere = '';
+  AppState.amphiNiveau = 'tous';
+  AppState.amphiNiveauTouched = false;
 }
