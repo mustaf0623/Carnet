@@ -8,7 +8,7 @@
 // métier (AppState.data, AppState.activeSectionId) vivent dans AppState —
 // voir state.js pour la justification de ce choix.
 
-import { AppState, showToast, emptyData, openConfirm } from '../state.js';
+import { AppState, showToast, emptyData, openConfirm, resetSectionScopedUIState } from '../state.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseConfigured } from '../config.js';
 import { idbGet, idbSet, idbDelete } from './indexeddb.js';
 
@@ -429,6 +429,15 @@ export async function switchSection(newSectionId) {
   if (previousSectionId && previousSectionId !== newSectionId && navigator.onLine && AppState.sb && AppState.sbUser) {
     try { await pushToSupabase(); } catch (e) { /* on continue quand même vers la nouvelle Section */ }
   }
+
+  // Essentiel : les identifiants de programme/séance/membre en mémoire
+  // (ex. AppState.pointageProgId) appartiennent à l'ANCIENNE Section et
+  // sont générés aléatoirement — ils ne correspondront quasiment jamais à
+  // quoi que ce soit dans la nouvelle. Sans cette remise à zéro, le premier
+  // rendu de l'onglet Pointage (ou Rapports, Amphithéâtre...) après le
+  // changement de Section plantait en cherchant un programme introuvable,
+  // figeant tout l'affichage.
+  resetSectionScopedUIState();
 
   AppState.activeSectionId = newSectionId;
   await persistAccessContext();
