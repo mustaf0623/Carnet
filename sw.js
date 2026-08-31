@@ -1,7 +1,7 @@
 // sw.js — Carnet
 // Stratégie : Stale-While-Revalidate pour les ressources de l'app,
 // + cache des assets externes utilisés (CDN, polices) et fallback navigation hors-ligne.
-const CACHE_NAME = 'carnet-v17';
+const CACHE_NAME = 'carnet-v19';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const CORE_ASSETS = [
   './js/db/indexeddb.js',
   './js/db/data.js',
   './js/db/sync.js',
+  './js/db/upload-queue.js',
   './js/domain/membres.js',
   './js/domain/stats.js',
   './js/export/xlsx-export.js',
@@ -32,6 +33,7 @@ const CORE_ASSETS = [
   './js/views/membres.js',
   './js/views/rapports.js',
   './js/views/amphitheatre.js',
+  './js/views/observations.js',
   './js/views/administration.js',
 ];
 
