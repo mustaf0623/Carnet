@@ -175,8 +175,11 @@ export async function loadAccessContext() {
   // La table `membres` est inaccessible en lecture directe pour le rôle
   // "utilisateur" (RLS réservée à CA/super-admin) : le seul canal autorisé
   // pour connaître son propre membre lié (UFR/Filière, nom, statut Sortant)
-  // est cette RPC dédiée, qui ne renvoie jamais que sa propre ligne.
-  if (AppState.sbProfile.role === 'utilisateur') {
+  // est cette RPC dédiée, qui ne renvoie jamais que sa propre ligne. Un
+  // compte "pf" peut aussi, facultativement, être lié à un membre (juste
+  // pour lui suggérer son niveau d'étude au moment d'un dépôt) — la RPC
+  // renvoie alors simplement null s'il n'a été rattaché à personne.
+  if (AppState.sbProfile.role === 'utilisateur' || AppState.sbProfile.role === 'pf') {
     try {
       const { data: rows, error } = await sb.rpc('get_my_membre_info');
       if (error) throw error;
