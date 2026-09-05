@@ -88,6 +88,8 @@ export function renderAdministration() {
       <div class="ledger">${visible.map(u => {
         const isSelf = u.id === AppState.sbUser?.id;
         const isUtilisateur = u.role === 'utilisateur';
+        const isPf = u.role === 'pf';
+        const showMembreSelect = isUtilisateur || isPf;
         return `<div class="admin-user-row" data-id="${u.id}">
           <div class="admin-user-identity">
             <div class="prog-name">${escapeHtml(u.name || 'Sans nom')}${isSelf ? ' <span style="font-weight:400;color:var(--ink-faint);">(vous)</span>' : ''}</div>
@@ -102,8 +104,8 @@ export function renderAdministration() {
               <option value="pf" ${u.role === 'pf' ? 'selected' : ''}>Visiteur (PF — lecture seule)</option>
               <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super-admin</option>
             </select>
-            <select class="admin-user-membre" data-id="${u.id}" data-current="${u.matched_membre_id || ''}" style="min-width:220px;${isUtilisateur ? '' : 'display:none;'}">
-              <option value="">${isUtilisateur ? '— Choisir le membre correspondant —' : ''}</option>
+            <select class="admin-user-membre" data-id="${u.id}" data-current="${u.matched_membre_id || ''}" style="min-width:220px;${showMembreSelect ? '' : 'display:none;'}">
+              <option value="">${isUtilisateur ? '— Choisir le membre correspondant —' : (isPf ? '— Aucun membre lié (facultatif) —' : '')}</option>
             </select>
             <label class="admin-user-active-label"><input class="admin-user-active" data-id="${u.id}" type="checkbox" ${u.active !== false ? 'checked' : ''} ${isSelf ? 'disabled' : ''}>actif</label>
             <button class="btn btn-ghost btn-sm save-user-btn" data-id="${u.id}">Enregistrer</button>
@@ -119,11 +121,13 @@ export function renderAdministration() {
 // déjà lié le cas échéant.
 async function populateMembreSelect(row) {
   const membreSelect = row.querySelector('.admin-user-membre');
+  const roleSelect = row.querySelector('.admin-user-role');
   const sectionId = row.querySelector('.admin-user-section').value;
   const current = membreSelect.dataset.current || '';
+  const emptyLabel = roleSelect.value === 'utilisateur' ? '— Choisir le membre correspondant —' : '— Aucun membre lié (facultatif) —';
   membreSelect.innerHTML = `<option value="">Chargement…</option>`;
   const membres = await fetchMembresForSection(sectionId);
-  membreSelect.innerHTML = `<option value="">— Choisir le membre correspondant —</option>`
+  membreSelect.innerHTML = `<option value="">${emptyLabel}</option>`
     + membres.map(m => `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${escapeHtml(m.prenom)} ${escapeHtml(m.nom)}</option>`).join('');
   if (!membres.length) membreSelect.innerHTML = `<option value="">Aucun membre importé dans cette Section</option>`;
 }
@@ -213,13 +217,16 @@ export function attachAdministrationEvents() {
   });
 
   // Basculer l'affichage du sélecteur de membre selon le rôle choisi, et le
-  // repeupler si la Section change pendant que le rôle "utilisateur" est actif.
+  // Basculer l'affichage du sélecteur de membre selon le rôle choisi (pour
+  // "utilisateur" ET "pf"), et le repeupler si la Section change pendant
+  // que l'un de ces deux rôles est actif.
   document.querySelectorAll('.admin-user-row').forEach(row => {
     const roleSelect = row.querySelector('.admin-user-role');
     const sectionSelect = row.querySelector('.admin-user-section');
     const membreSelect = row.querySelector('.admin-user-membre');
+    const needsMembreSelect = () => roleSelect.value === 'utilisateur' || roleSelect.value === 'pf';
     const syncMembreVisibility = () => {
-      if (roleSelect.value === 'utilisateur') {
+      if (needsMembreSelect()) {
         membreSelect.style.display = '';
         populateMembreSelect(row);
       } else {
@@ -227,8 +234,8 @@ export function attachAdministrationEvents() {
       }
     };
     roleSelect.addEventListener('change', syncMembreVisibility);
-    sectionSelect.addEventListener('change', () => { if (roleSelect.value === 'utilisateur') populateMembreSelect(row); });
-    if (roleSelect.value === 'utilisateur') populateMembreSelect(row);
+    sectionSelect.addEventListener('change', () => { if (needsMembreSelect()) populateMembreSelect(row); });
+    if (needsMembreSelect()) populateMembreSelect(row);
   });
 
   document.querySelectorAll('.save-user-btn').forEach(btn => btn.addEventListener('click', () => runOrExplain(async () => {
