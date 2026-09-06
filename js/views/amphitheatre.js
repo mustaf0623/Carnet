@@ -1,7 +1,7 @@
 // views/amphitheatre.js — Onglet Amphithéâtre : dépôt et consultation de
 // documents de cours (Supabase Storage), classés par UFR/Filière.
 import { AppState, showToast, openConfirm } from '../state.js';
-import { AMPHI_TYPE_LABEL, AMPHI_TYPES_WITH_CORRECTION, NIVEAU_LABEL, escapeHtml, uid, fmtDate, todayISO } from '../config.js';
+import { AMPHI_TYPE_LABEL, AMPHI_TYPES_WITH_CORRECTION, NIVEAU_LABEL, escapeHtml, uid, fmtDate, todayISO, isPfRole } from '../config.js';
 import { saveData } from '../db/data.js';
 import { getMemberUfrFiliere, amphiUfrFiliereOptions, getNiveauCode, NIVEAU_CODES, isSortant, hasSortantAccessExpired, daysSinceSortant, SORTANT_GRACE_DAYS } from '../domain/membres.js';
 import { emptyRow } from '../components/ui.js';
@@ -105,7 +105,7 @@ export function renderAmphitheatre() {
     // ensuite naviguer librement vers d'autres niveaux de sa Filière (ex.
     // consulter les documents de l'année précédente).
     if (AppState.amphiNiveau === 'tous' && detectedNiveau && !AppState.amphiNiveauTouched) AppState.amphiNiveau = detectedNiveau;
-  } else if (AppState.sbProfile?.role === 'pf' && AppState.myMembreInfo) {
+  } else if (isPfRole(AppState.sbProfile?.role) && AppState.myMembreInfo) {
     // "pf" peut être rattaché facultativement à un membre (Administration) :
     // ça ne restreint jamais sa navigation (toujours libre entre
     // Sections/UFR/Filières), ça sert uniquement à lui suggérer son niveau

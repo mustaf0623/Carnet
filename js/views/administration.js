@@ -15,7 +15,7 @@
 // RPC `admin_assign_role`, qui exige ce membre et refuse sinon — impossible
 // de reproduire côté client le bug d'un compte "utilisateur" sans membre lié.
 import { AppState, showToast, openConfirm } from '../state.js';
-import { escapeHtml } from '../config.js';
+import { escapeHtml, isPfRole } from '../config.js';
 import { emptyRow } from '../components/ui.js';
 import { loadAccessContext, pullFromSupabase, updateSnapshotsFromCurrent } from '../db/sync.js';
 
@@ -75,7 +75,9 @@ export function renderAdministration() {
           <option value="tous" ${AppState.adminUserRoleFilter === 'tous' ? 'selected' : ''}>Tous les rôles</option>
           <option value="utilisateur" ${AppState.adminUserRoleFilter === 'utilisateur' ? 'selected' : ''}>Utilisateur (Amphithéâtre)</option>
           <option value="ca" ${AppState.adminUserRoleFilter === 'ca' ? 'selected' : ''}>CA</option>
-          <option value="pf" ${AppState.adminUserRoleFilter === 'pf' ? 'selected' : ''}>Visiteur (PF)</option>
+          <option value="pf_section" ${AppState.adminUserRoleFilter === 'pf_section' ? 'selected' : ''}>PF de Section</option>
+          <option value="pf_conseil" ${AppState.adminUserRoleFilter === 'pf_conseil' ? 'selected' : ''}>PF Conseil</option>
+          <option value="pf" ${AppState.adminUserRoleFilter === 'pf' ? 'selected' : ''}>PF ancien (Conseil)</option>
           <option value="super_admin" ${AppState.adminUserRoleFilter === 'super_admin' ? 'selected' : ''}>Super-admin</option>
         </select>
         <select id="adminUserSectionFilter" style="min-width:170px;">${sectionFilterOptions}</select>
@@ -88,7 +90,7 @@ export function renderAdministration() {
       <div class="ledger">${visible.map(u => {
         const isSelf = u.id === AppState.sbUser?.id;
         const isUtilisateur = u.role === 'utilisateur';
-        const isPf = u.role === 'pf';
+        const isPf = isPfRole(u.role);
         const showMembreSelect = isUtilisateur || isPf;
         return `<div class="admin-user-row" data-id="${u.id}">
           <div class="admin-user-identity">
@@ -101,7 +103,8 @@ export function renderAdministration() {
             <select class="admin-user-role" data-id="${u.id}" ${isSelf ? 'disabled' : ''}>
               <option value="utilisateur" ${u.role === 'utilisateur' ? 'selected' : ''}>Utilisateur (Amphithéâtre)</option>
               <option value="ca" ${u.role === 'ca' ? 'selected' : ''}>CA</option>
-              <option value="pf" ${u.role === 'pf' ? 'selected' : ''}>Visiteur (PF — lecture seule)</option>
+              <option value="pf_section" ${u.role === 'pf_section' ? 'selected' : ''}>PF de Section (lecture seule)</option>
+              <option value="pf_conseil" ${u.role === 'pf_conseil' || u.role === 'pf' ? 'selected' : ''}>PF Conseil (lecture seule)</option>
               <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super-admin</option>
             </select>
             <select class="admin-user-membre" data-id="${u.id}" data-current="${u.matched_membre_id || ''}" style="min-width:220px;${showMembreSelect ? '' : 'display:none;'}">
@@ -224,7 +227,7 @@ export function attachAdministrationEvents() {
     const roleSelect = row.querySelector('.admin-user-role');
     const sectionSelect = row.querySelector('.admin-user-section');
     const membreSelect = row.querySelector('.admin-user-membre');
-    const needsMembreSelect = () => roleSelect.value === 'utilisateur' || roleSelect.value === 'pf';
+    const needsMembreSelect = () => roleSelect.value === 'utilisateur' || isPfRole(roleSelect.value);
     const syncMembreVisibility = () => {
       if (needsMembreSelect()) {
         membreSelect.style.display = '';

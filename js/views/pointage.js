@@ -4,14 +4,14 @@
 // absents par défaut même en mode rapide — seul un clic explicite crée un
 // pointage pour eux, s'ils se présentent exceptionnellement à une séance.
 import { AppState, showToast, openConfirm } from '../state.js';
-import { ICONS, escapeHtml, uid, fmtDate, initials } from '../config.js';
+import { ICONS, escapeHtml, uid, fmtDate, initials, isPfRole } from '../config.js';
 import { saveData } from '../db/data.js';
 import { memberInProgramme, checkApPromotion, isSortant } from '../domain/membres.js';
 import { emptyRow, sessionOptionsByYear } from '../components/ui.js';
 
 export function renderPointage() {
   const d = AppState.data;
-  const isReadOnly = AppState.sbProfile?.role === 'pf';
+  const isReadOnly = isPfRole(AppState.sbProfile?.role);
   if (!d.programmes.length) return `<div class="page-head"><div><div class="eyebrow">Registre</div><h1 class="page-title">Pointage</h1></div></div>
     <div class="card empty-state">${ICONS.pointage}<h3 style="color:var(--ink);margin:0 0 6px;">Aucun programme</h3><p>Créez d’abord un programme dans l’onglet Membres.</p></div>`;
   // Reprend le premier programme disponible si l'identifiant mémorisé est

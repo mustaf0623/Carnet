@@ -40,6 +40,8 @@ export const nowTime = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-d
 export const initials = (nom, prenom) => ((prenom ? prenom[0] : '') + (nom ? nom[0] : '')).toUpperCase();
 export const escapeHtml = (s) => (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const normKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+export const isPfRole = role => role === 'pf' || role === 'pf_section' || role === 'pf_conseil';
+export const isPfConseilRole = role => role === 'pf' || role === 'pf_conseil';
 
 /* ---------- Périodes (année / mois) ---------- */
 export const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];

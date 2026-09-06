@@ -1,7 +1,7 @@
 // views/membres.js — Onglet Membres & programmes : gestion des programmes,
 // ajout manuel de membres, import Excel, export Excel/PDF, zone sensible.
 import { AppState, showToast, openConfirm } from '../state.js';
-import { ICONS, escapeHtml, uid, todayISO } from '../config.js';
+import { ICONS, escapeHtml, uid, todayISO, isPfRole } from '../config.js';
 import { saveData, resetAppData } from '../db/data.js';
 import { memberInProgramme, extraFieldKeys, isSortant, daysSinceSortant, hasSortantAccessExpired, SORTANT_GRACE_DAYS } from '../domain/membres.js';
 import { emptyRow } from '../components/ui.js';
@@ -10,7 +10,7 @@ import { buildExportPdf } from '../export/pdf-export.js';
 
 export function renderMembres() {
   const d = AppState.data;
-  const isReadOnly = AppState.sbProfile?.role === 'pf';
+  const isReadOnly = isPfRole(AppState.sbProfile?.role);
   return `
     <div class="page-head">
       <div>

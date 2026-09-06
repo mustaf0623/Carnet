@@ -5,14 +5,14 @@
 // le pointage, donc consultable ET modifiable hors ligne, avec envoi
 // automatique à la reconnexion via le mécanisme de synchronisation général.
 import { AppState, showToast, openConfirm } from '../state.js';
-import { escapeHtml, fmtDate, uid } from '../config.js';
+import { escapeHtml, fmtDate, uid, isPfRole } from '../config.js';
 import { saveData } from '../db/data.js';
 import { emptyRow } from '../components/ui.js';
 
 const editingIds = new Set();
 
 function roleLabel(role) {
-  if (role === 'pf') return 'Visiteur (PF)';
+  if (isPfRole(role)) return role === 'pf_section' ? 'Visiteur PF de Section' : 'Visiteur PF Conseil';
   if (role === 'super_admin') return 'Super-admin';
   if (role === 'ca') return 'CA';
   return role || '—';
@@ -24,9 +24,9 @@ function sortedObservations() {
 
 export function renderObservations() {
   const role = AppState.sbProfile?.role;
-  const canWrite = role === 'pf' || role === 'ca' || role === 'super_admin';
+  const canWrite = isPfRole(role) || role === 'ca' || role === 'super_admin';
   const observations = sortedObservations();
-  return `<div class="page-head"><div><div class="eyebrow">Suivi</div><h1 class="page-title">Observations</h1><p class="page-sub">Espace d’échange entre Point Focaux et la Commission Administrative de la Section. Visible uniquement par la CA et le super-admin.</p></div></div>
+  return `<div class="page-head"><div><div class="eyebrow">Suivi</div><h1 class="page-title">Observations</h1><p class="page-sub">Espace d’échange entre le Visiteur (PF) et la Commission Administrative de cette Section — visible uniquement par son CA et le super-admin.</p></div></div>
     ${canWrite ? `<div class="card">
       <h3 class="card-title">Nouvelle observation</h3>
       <textarea id="newObservationText" placeholder="Écrire une observation…" style="width:100%;min-height:100px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-family:inherit;font-size:13.5px;resize:vertical;box-sizing:border-box;"></textarea>

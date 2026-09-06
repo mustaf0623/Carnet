@@ -9,7 +9,7 @@
 // voir state.js pour la justification de ce choix.
 
 import { AppState, showToast, emptyData, openConfirm, resetSectionScopedUIState } from '../state.js';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseConfigured } from '../config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseConfigured, isPfRole, isPfConseilRole } from '../config.js';
 import { idbGet, idbSet, idbDelete } from './indexeddb.js';
 
 const SYNC_STATE_KEY = 'carnet-sync-state';
@@ -166,7 +166,7 @@ export async function loadAccessContext() {
   // celle déjà choisie, sinon celle de son profil, sinon la première
   // disponible. Sans ce traitement particulier, un compte "pf" sans
   // section_id renseigné se retrouverait bloqué sur l'écran "en attente".
-  if (AppState.sbProfile.role === 'super_admin' || AppState.sbProfile.role === 'pf') {
+  if (AppState.sbProfile.role === 'super_admin' || isPfConseilRole(AppState.sbProfile.role)) {
     AppState.activeSectionId = AppState.activeSectionId || AppState.sbProfile.sectionId || AppState.sbSections[0]?.id || null;
   } else {
     AppState.activeSectionId = AppState.sbProfile.sectionId;
@@ -179,7 +179,7 @@ export async function loadAccessContext() {
   // compte "pf" peut aussi, facultativement, être lié à un membre (juste
   // pour lui suggérer son niveau d'étude au moment d'un dépôt) — la RPC
   // renvoie alors simplement null s'il n'a été rattaché à personne.
-  if (AppState.sbProfile.role === 'utilisateur' || AppState.sbProfile.role === 'pf') {
+  if (AppState.sbProfile.role === 'utilisateur' || isPfRole(AppState.sbProfile.role)) {
     try {
       const { data: rows, error } = await sb.rpc('get_my_membre_info');
       if (error) throw error;
