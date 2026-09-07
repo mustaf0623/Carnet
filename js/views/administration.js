@@ -77,7 +77,6 @@ export function renderAdministration() {
           <option value="ca" ${AppState.adminUserRoleFilter === 'ca' ? 'selected' : ''}>CA</option>
           <option value="pf_section" ${AppState.adminUserRoleFilter === 'pf_section' ? 'selected' : ''}>PF de Section</option>
           <option value="pf_conseil" ${AppState.adminUserRoleFilter === 'pf_conseil' ? 'selected' : ''}>PF Conseil</option>
-          <option value="pf" ${AppState.adminUserRoleFilter === 'pf' ? 'selected' : ''}>PF ancien (Conseil)</option>
           <option value="super_admin" ${AppState.adminUserRoleFilter === 'super_admin' ? 'selected' : ''}>Super-admin</option>
         </select>
         <select id="adminUserSectionFilter" style="min-width:170px;">${sectionFilterOptions}</select>
