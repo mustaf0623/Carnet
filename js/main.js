@@ -21,6 +21,8 @@ import { initSyncState, initSupabaseClient, startApp, reconcileSync, loadCachedA
 import { initUploadQueue, processUploadQueue } from './db/upload-queue.js';
 import { initInstallPrompt, registerServiceWorker } from './pwa.js';
 
+registerServiceWorker();
+
 // Casse le cycle d'import : state.js est un module bas niveau qui ne peut pas
 // importer shell.js (haut niveau) sans créer une dépendance circulaire. On
 // peuple donc la référence de rendu ici, une fois les deux modules chargés.

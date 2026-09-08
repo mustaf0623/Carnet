@@ -2,6 +2,7 @@
 // Stratégie : Stale-While-Revalidate pour les ressources de l'app,
 // + cache des assets externes utilisés (CDN, polices) et fallback navigation hors-ligne.
 const CACHE_NAME = 'carnet-v22A';
+const APP_SHELL_URL = new URL('./index.html', self.location.href).href;
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -90,15 +91,16 @@ self.addEventListener('fetch', (event) => {
     if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
       try {
         const netResp = await fetch(req, { cache: 'no-store' });
-        if (netResp) {
+        if (netResp && netResp.ok) {
           // Enregistrez la réponse réseau (utile pour mise à jour)
           try { cache.put(req, netResp.clone()); } catch (e) { /* noop */ }
           return netResp;
         }
       } catch (err) {
         // Réseau indisponible — retourner la page en cache (index) si disponible
-        return cached || await cache.match('./') || await cache.match('./index.html');
+        return cached || await cache.match(APP_SHELL_URL) || await cache.match('./') || await cache.match('./index.html');
       }
+      return cached || await cache.match(APP_SHELL_URL) || await cache.match('./') || await cache.match('./index.html');
     }
 
     // Pour les autres requêtes : Stale-While-Revalidate
