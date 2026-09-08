@@ -97,7 +97,7 @@ self.addEventListener('fetch', (event) => {
         }
       } catch (err) {
         // Réseau indisponible — retourner la page en cache (index) si disponible
-        return cached || await cache.match('./') || await cache.match('/index.html');
+        return cached || await cache.match('./') || await cache.match('./index.html');
       }
     }
 
